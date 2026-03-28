@@ -8,13 +8,13 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QListWidget, QComboBox, QLineEdit, QLabel, QPushButton,
-    QStackedWidget, QScrollArea, QFrame, QSplitter, QSpinBox,
-    QDoubleSpinBox, QMessageBox,
+    QStackedWidget, QScrollArea, QFrame, QSplitter, QMessageBox,
 )
 from PySide6.QtCore import Qt
 
 from fv_options import FV_OPTIONS_CATALOG
 from porous_db import PorousDatabase, POROUS_KEYS
+from dict_editor import _make_numeric_line_edit
 
 
 class SingleOptionEditor(QScrollArea):
@@ -204,21 +204,12 @@ class SingleOptionEditor(QScrollArea):
             w.currentTextChanged.connect(lambda val, k=key: self._write(k, val))
             self._widgets[key] = w
         elif ftype == "int":
-            w = QSpinBox()
-            if options:
-                w.setMinimum(options[0])
-                w.setMaximum(options[1])
-            w.setValue(int(default))
-            w.valueChanged.connect(lambda val, k=key: self._write(k, val))
+            w = _make_numeric_line_edit(default, is_int=True)
+            w.textChanged.connect(lambda val, k=key: self._write_numeric(k, val, True))
             self._widgets[key] = w
         elif ftype == "float":
-            w = QDoubleSpinBox()
-            w.setDecimals(6)
-            if options:
-                w.setMinimum(options[0])
-                w.setMaximum(options[1])
-            w.setValue(float(default))
-            w.valueChanged.connect(lambda val, k=key: self._write(k, val))
+            w = _make_numeric_line_edit(default, is_int=False)
+            w.textChanged.connect(lambda val, k=key: self._write_numeric(k, val, False))
             self._widgets[key] = w
         else:
             w = QLineEdit(str(default))
@@ -229,6 +220,15 @@ class SingleOptionEditor(QScrollArea):
     def _write(self, key, value):
         if not self._updating:
             self.db.set_fv_option_param(self.opt_name, key, value)
+
+    def _write_numeric(self, key, text, is_int):
+        if self._updating:
+            return
+        try:
+            value = int(text) if is_int else float(text)
+            self.db.set_fv_option_param(self.opt_name, key, value)
+        except ValueError:
+            pass
 
     def _load_from_db(self):
         self._updating = True
@@ -242,10 +242,6 @@ class SingleOptionEditor(QScrollArea):
                 idx = widget.findText(str(val))
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
-            elif isinstance(widget, QSpinBox):
-                widget.setValue(int(val))
-            elif isinstance(widget, QDoubleSpinBox):
-                widget.setValue(float(val))
             elif isinstance(widget, QLineEdit):
                 widget.setText(str(val))
         self._updating = False

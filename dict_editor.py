@@ -7,10 +7,33 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QGroupBox,
-    QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QLabel,
+    QLineEdit, QComboBox, QLabel,
     QScrollArea, QFrame,
 )
 from PySide6.QtCore import Signal, Qt
+
+
+_VALID_STYLE = ""
+_INVALID_STYLE = "border: 2px solid #E53935;"
+
+
+def _make_numeric_line_edit(default, is_int: bool = False):
+    """Create a QLineEdit with numeric validation styling."""
+    w = QLineEdit(str(default))
+
+    def _validate(text, widget=w, integer=is_int):
+        try:
+            if integer:
+                int(text)
+            else:
+                float(text)
+            widget.setStyleSheet(_VALID_STYLE)
+        except ValueError:
+            if text.strip():
+                widget.setStyleSheet(_INVALID_STYLE)
+
+    w.textChanged.connect(_validate)
+    return w
 
 
 class DictEditor(QScrollArea):
@@ -34,7 +57,7 @@ class DictEditor(QScrollArea):
         layout.setSpacing(8)
 
         title = QLabel(f"<b>{dict_spec['label']}</b>  —  <code>{dict_spec['path']}</code>")
-        title.setStyleSheet("padding: 4px; color: #37474f;")
+        title.setObjectName("header")
         layout.addWidget(title)
 
         self._conditional_groups: list[tuple[QGroupBox, list]] = []
@@ -73,16 +96,12 @@ class DictEditor(QScrollArea):
         self._info_config = dict_spec.get("info")
         if self._info_config:
             self._info_frame = QFrame()
-            self._info_frame.setStyleSheet(
-                "QFrame { background: #ECEFF1; border: 1px solid #CFD8DC; "
-                "border-radius: 6px; padding: 12px; }"
-            )
+            self._info_frame.setObjectName("infoPanel")
             info_layout = QVBoxLayout(self._info_frame)
             info_layout.setContentsMargins(12, 12, 12, 12)
             self._info_label = QLabel()
             self._info_label.setWordWrap(True)
             self._info_label.setTextFormat(Qt.TextFormat.RichText)
-            self._info_label.setStyleSheet("font-size: 12px; color: #263238;")
             info_layout.addWidget(self._info_label)
             layout.addWidget(self._info_frame)
 
@@ -153,21 +172,12 @@ class DictEditor(QScrollArea):
             w.currentTextChanged.connect(lambda val, k=key: self._write_to_db(k, val))
             self._widgets[key] = w
         elif ftype == "int":
-            w = QSpinBox()
-            if options:
-                w.setMinimum(options[0])
-                w.setMaximum(options[1])
-            w.setValue(int(default))
-            w.valueChanged.connect(lambda val, k=key: self._write_to_db(k, val))
+            w = _make_numeric_line_edit(default, is_int=True)
+            w.textChanged.connect(lambda val, k=key: self._write_numeric(k, val, True))
             self._widgets[key] = w
         elif ftype == "float":
-            w = QDoubleSpinBox()
-            w.setDecimals(6)
-            if options:
-                w.setMinimum(options[0])
-                w.setMaximum(options[1])
-            w.setValue(float(default))
-            w.valueChanged.connect(lambda val, k=key: self._write_to_db(k, val))
+            w = _make_numeric_line_edit(default, is_int=False)
+            w.textChanged.connect(lambda val, k=key: self._write_numeric(k, val, False))
             self._widgets[key] = w
         elif ftype == "bool":
             w = QComboBox()
@@ -180,6 +190,16 @@ class DictEditor(QScrollArea):
             w.textChanged.connect(lambda val, k=key: self._write_to_db(k, val))
             self._widgets[key] = w
         return w
+
+    def _write_numeric(self, key: str, text: str, is_int: bool):
+        """Write numeric value to db only if valid."""
+        if self._updating:
+            return
+        try:
+            value = int(text) if is_int else float(text)
+            self.db.set_dict_value(self.dict_path, key, value)
+        except ValueError:
+            pass  # invalid input — don't write
 
     def _write_to_db(self, key: str, value):
         """Widget changed → write to database."""
@@ -203,10 +223,6 @@ class DictEditor(QScrollArea):
                 idx = widget.findText(str(val))
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
-            elif isinstance(widget, QSpinBox):
-                widget.setValue(int(val))
-            elif isinstance(widget, QDoubleSpinBox):
-                widget.setValue(float(val))
             elif isinstance(widget, QLineEdit):
                 widget.setText(str(val))
         self._updating = False
